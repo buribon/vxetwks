@@ -1,0 +1,40 @@
+name: Build VXE for Windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Restore tweak catalogue
+        shell: pwsh
+        run: |
+          $encoded = (Get-Content tweaks.json.gz.b64 -Raw).Trim()
+          $compressed = [Convert]::FromBase64String($encoded)
+          $inputStream = [System.IO.MemoryStream]::new($compressed)
+          $gzip = [System.IO.Compression.GZipStream]::new($inputStream, [System.IO.Compression.CompressionMode]::Decompress)
+          $outputStream = [System.IO.File]::Create("tweaks.json")
+          try { $gzip.CopyTo($outputStream) } finally { $outputStream.Dispose(); $gzip.Dispose(); $inputStream.Dispose() }
+          $items = Get-Content tweaks.json -Raw | ConvertFrom-Json
+          Write-Host "Loaded $($items.Count) tweak entries"
+      - name: Publish self-contained x64 EXE
+        run: dotnet publish VXE.csproj --configuration Release --runtime win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true -o publish
+      - name: Upload VXE.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: VXE-Windows-x64
+          path: publish/VXE.exe
+          if-no-files-found: error
+          retention-days: 14
